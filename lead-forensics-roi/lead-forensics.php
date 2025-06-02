@@ -1,14 +1,14 @@
 <?php
 /*
 Plugin Name: Lead Forensics
-Plugin URI: http://wordpress.org/extend/plugins/leadforensics/
+Plugin URI: https://wordpress.org/plugins/lead-forensics-roi/
 Description: Lead Forensics allows you to Turn your anonymous website visitors into sales leads, convert new business opportunities before your competitiors and increase your online ROI. This plugin allows you to easily add your tracking code from Lead Forensics to the head of your WordPress site
-Version: 3.3.9
+Version: 3.3.10
 Author: Lead Forensics
 Author URI: http://www.leadforensics.com/
 Author Email: wordpress-plugin-support@leadforensics.com
 Network: false
-Copyright 2008-2023 Lead Forensics (wordpress-plugin-support@leadforensics.com)
+Copyright 2008-2025 Lead Forensics (wordpress-plugin-support@leadforensics.com)
 
 This program is free software; you can redistribute it and/or modify
 it under the terms of the GNU General Public License, version 2, as
