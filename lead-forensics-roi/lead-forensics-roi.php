@@ -3,7 +3,7 @@
  * Plugin Name: Lead Forensics
  * Plugin URI:  https://www.leadforensics.com
  * Description: Adds the Lead Forensics tracking script to your WordPress site. Correctly places the script tag in the head and noscript tag after the body open tag, without async or defer.
- * Version:     3.4.0
+ * Version:     3.5.1
  * Author:      Lead Forensics
  * Author URI:  https://www.leadforensics.com
  * License:     GPL-2.0+
@@ -15,11 +15,99 @@ if ( ! defined( 'ABSPATH' ) ) {
     exit;
 }
 
-define( 'LFV2_VERSION', '3.4.0' );
+define( 'LFV2_VERSION', '3.5.1' );
 define( 'LFV2_PLUGIN_URL', plugin_dir_url( __FILE__ ) );
 define( 'LFV2_PLUGIN_BASENAME', plugin_basename( __FILE__ ) );
 define( 'LFV2_SCRIPT_TAG', 'lfv2_script_tag' );
 define( 'LFV2_NOSCRIPT_TAG', 'lfv2_noscript_tag' );
+
+// ── Activation: migrate from old plugin ───────────────
+// Runs once on activation. Reads the old plugin's combined
+// tracking code (wplf_code), splits it into script and
+// noscript parts, saves into our new options, then deletes
+// the old option so there is no risk of duplicate injection.
+
+register_activation_hook( __FILE__, 'lfv2_activate' );
+
+function lfv2_activate() {
+    lfv2_migrate_legacy_code();
+}
+
+function lfv2_migrate_legacy_code() {
+
+    // Only run if the old option exists and our new options are empty.
+    $legacy = get_option( 'wplf_code', '' );
+
+    if ( empty( $legacy ) ) {
+        return;
+    }
+
+    $existing_script   = get_option( LFV2_SCRIPT_TAG, '' );
+    $existing_noscript = get_option( LFV2_NOSCRIPT_TAG, '' );
+
+    // Don't overwrite if the customer has already configured the new plugin.
+    if ( ! empty( $existing_script ) || ! empty( $existing_noscript ) ) {
+        return;
+    }
+
+    $legacy = trim( $legacy );
+
+    // Extract the <script>...</script> portion.
+    $script_tag = '';
+    if ( preg_match( '/<script[\s\S]*?<\/script>/i', $legacy, $script_matches ) ) {
+        $script_tag = lfv2_sanitize_script( trim( $script_matches[0] ) );
+    }
+
+    // Extract the <noscript>...</noscript> portion.
+    $noscript_tag = '';
+    if ( preg_match( '/<noscript[\s\S]*?<\/noscript>/i', $legacy, $noscript_matches ) ) {
+        $noscript_tag = trim( $noscript_matches[0] );
+    }
+
+    // If we could not split cleanly, save the whole thing as the script tag
+    // so the customer at least has their code and can correct it manually.
+    if ( empty( $script_tag ) && ! empty( $legacy ) ) {
+        $script_tag = lfv2_sanitize_script( $legacy );
+    }
+
+    // Save the migrated values.
+    if ( ! empty( $script_tag ) ) {
+        update_option( LFV2_SCRIPT_TAG, $script_tag );
+    }
+
+    if ( ! empty( $noscript_tag ) ) {
+        update_option( LFV2_NOSCRIPT_TAG, $noscript_tag );
+    }
+
+    // Delete the old option so the old code cannot be injected
+    // by any remaining reference to the legacy plugin.
+    delete_option( 'wplf_code' );
+
+    // Record that migration ran so we can show a notice in the admin.
+    update_option( 'lfv2_migrated', '1' );
+}
+
+// ── Upgrade migration (runs on admin page load) ───────
+// register_activation_hook does not fire on plugin updates,
+// only on fresh activations. This catches existing users who
+// update via the WordPress dashboard without re-activating.
+
+add_action( 'admin_init', 'lfv2_maybe_migrate' );
+
+function lfv2_maybe_migrate() {
+    // Run if the old option still exists (covers fresh updates from 2.x/3.3.x).
+    // Also run if the stored version is below 3.5.1 (covers users who landed
+    // on 3.4.0 before migration logic existed).
+    $old_code        = get_option( 'wplf_code', '' );
+    $current_version = get_option( 'lfv2_db_version', '0' );
+
+    if ( $old_code !== '' || version_compare( $current_version, '3.5.1', '<' ) ) {
+        lfv2_migrate_legacy_code();
+    }
+
+    // Store the current version so we can detect future upgrades.
+    update_option( 'lfv2_db_version', LFV2_VERSION );
+}
 
 // ── Bootstrap ──────────────────────────────────────────
 
@@ -134,6 +222,13 @@ function lfv2_settings_page() {
 
         <div class="lf-body">
             <div class="lf-main">
+
+                <?php if ( get_option( 'lfv2_migrated' ) === '1' ) : ?>
+                <div class="lf-notice lf-notice--migrated">
+                    <span>&#10003;</span> <?php esc_html_e( 'Your tracking code has been automatically carried over from the previous plugin version and is live. Please check the fields below to confirm everything looks correct.', 'lead-forensics' ); ?>
+                </div>
+                <?php delete_option( 'lfv2_migrated' ); ?>
+                <?php endif; ?>
 
                 <?php if ( $saved ) : ?>
                 <div class="lf-notice">
