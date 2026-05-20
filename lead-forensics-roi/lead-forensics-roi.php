@@ -3,7 +3,7 @@
  * Plugin Name: Lead Forensics
  * Plugin URI:  https://www.leadforensics.com
  * Description: Adds the Lead Forensics tracking script to your WordPress site. Correctly places the script tag in the head and noscript tag after the body open tag, without async or defer.
- * Version:     3.5.1
+ * Version:     3.5.2
  * Author:      Lead Forensics
  * Author URI:  https://www.leadforensics.com
  * License:     GPL-2.0+
@@ -15,7 +15,7 @@ if ( ! defined( 'ABSPATH' ) ) {
     exit;
 }
 
-define( 'LFV2_VERSION', '3.5.1' );
+define( 'LFV2_VERSION', '3.5.2' );
 define( 'LFV2_PLUGIN_URL', plugin_dir_url( __FILE__ ) );
 define( 'LFV2_PLUGIN_BASENAME', plugin_basename( __FILE__ ) );
 define( 'LFV2_SCRIPT_TAG', 'lfv2_script_tag' );
@@ -23,7 +23,7 @@ define( 'LFV2_NOSCRIPT_TAG', 'lfv2_noscript_tag' );
 
 // ── Activation: migrate from old plugin ───────────────
 // Runs once on activation. Reads the old plugin's combined
-// tracking code (wplf_code), splits it into script and
+// tracking code (lfr_options), splits it into script and
 // noscript parts, saves into our new options, then deletes
 // the old option so there is no risk of duplicate injection.
 
@@ -35,8 +35,9 @@ function lfv2_activate() {
 
 function lfv2_migrate_legacy_code() {
 
-    // Only run if the old option exists and our new options are empty.
-    $legacy = get_option( 'wplf_code', '' );
+    // Read from the old plugin's option (lfr_options array, key lfr_tracking_code)
+    $old_values = get_option( 'lfr_options', array() );
+    $legacy     = isset( $old_values['lfr_tracking_code'] ) ? $old_values['lfr_tracking_code'] : '';
 
     if ( empty( $legacy ) ) {
         return;
@@ -81,27 +82,27 @@ function lfv2_migrate_legacy_code() {
 
     // Delete the old option so the old code cannot be injected
     // by any remaining reference to the legacy plugin.
-    delete_option( 'wplf_code' );
+    delete_option( 'lfr_options' );
 
     // Record that migration ran so we can show a notice in the admin.
     update_option( 'lfv2_migrated', '1' );
 }
 
-// ── Upgrade migration (runs on admin page load) ───────
+// ── Upgrade migration (runs on admin page load) ────────
 // register_activation_hook does not fire on plugin updates,
 // only on fresh activations. This catches existing users who
 // update via the WordPress dashboard without re-activating.
+// Also catches users who landed on 3.5.1 before migration
+// logic had the correct option name.
 
 add_action( 'admin_init', 'lfv2_maybe_migrate' );
 
 function lfv2_maybe_migrate() {
-    // Run if the old option still exists (covers fresh updates from 2.x/3.3.x).
-    // Also run if the stored version is below 3.5.1 (covers users who landed
-    // on 3.4.0 before migration logic existed).
-    $old_code        = get_option( 'wplf_code', '' );
+    $old_values      = get_option( 'lfr_options', array() );
+    $old_code        = isset( $old_values['lfr_tracking_code'] ) ? $old_values['lfr_tracking_code'] : '';
     $current_version = get_option( 'lfv2_db_version', '0' );
 
-    if ( $old_code !== '' || version_compare( $current_version, '3.5.1', '<' ) ) {
+    if ( $old_code !== '' || version_compare( $current_version, '3.5.2', '<' ) ) {
         lfv2_migrate_legacy_code();
     }
 

@@ -3,7 +3,7 @@ Contributors: leadforensics
 Tags: lead forensics, tracking, b2b, analytics, visitor tracking
 Requires at least: 5.2
 Tested up to: 6.5
-Stable tag: 3.5.1
+Stable tag: 3.5.2
 Requires PHP: 5.6
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
