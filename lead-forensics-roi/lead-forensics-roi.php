@@ -3,7 +3,7 @@
  * Plugin Name: Lead Forensics
  * Plugin URI:  https://www.leadforensics.com
  * Description: Adds the Lead Forensics tracking script to your WordPress site. Correctly places the script tag in the head and noscript tag after the body open tag, without async or defer.
- * Version:     3.5.2
+ * Version:     3.5.3
  * Author:      Lead Forensics
  * Author URI:  https://www.leadforensics.com
  * License:     GPL-2.0+
@@ -15,17 +15,13 @@ if ( ! defined( 'ABSPATH' ) ) {
     exit;
 }
 
-define( 'LFV2_VERSION', '3.5.2' );
+define( 'LFV2_VERSION', '3.5.3' );
 define( 'LFV2_PLUGIN_URL', plugin_dir_url( __FILE__ ) );
 define( 'LFV2_PLUGIN_BASENAME', plugin_basename( __FILE__ ) );
 define( 'LFV2_SCRIPT_TAG', 'lfv2_script_tag' );
 define( 'LFV2_NOSCRIPT_TAG', 'lfv2_noscript_tag' );
 
 // ── Activation: migrate from old plugin ───────────────
-// Runs once on activation. Reads the old plugin's combined
-// tracking code (lfr_options), splits it into script and
-// noscript parts, saves into our new options, then deletes
-// the old option so there is no risk of duplicate injection.
 
 register_activation_hook( __FILE__, 'lfv2_activate' );
 
@@ -35,7 +31,6 @@ function lfv2_activate() {
 
 function lfv2_migrate_legacy_code() {
 
-    // Read from the old plugin's option (lfr_options array, key lfr_tracking_code)
     $old_values = get_option( 'lfr_options', array() );
     $legacy     = isset( $old_values['lfr_tracking_code'] ) ? $old_values['lfr_tracking_code'] : '';
 
@@ -46,32 +41,36 @@ function lfv2_migrate_legacy_code() {
     $existing_script   = get_option( LFV2_SCRIPT_TAG, '' );
     $existing_noscript = get_option( LFV2_NOSCRIPT_TAG, '' );
 
-    // Don't overwrite if the customer has already configured the new plugin.
+    // Don't overwrite if customer has already configured the new plugin.
     if ( ! empty( $existing_script ) || ! empty( $existing_noscript ) ) {
         return;
     }
 
     $legacy = trim( $legacy );
 
-    // Extract the <script>...</script> portion.
+    // Extract <script>...</script> only — stop strictly at </script>.
     $script_tag = '';
-    if ( preg_match( '/<script[\s\S]*?<\/script>/i', $legacy, $script_matches ) ) {
-        $script_tag = lfv2_sanitize_script( trim( $script_matches[0] ) );
+    if ( preg_match( '/<script[^>]*>.*?<\/script>/is', $legacy, $script_matches ) ) {
+        $script_tag = trim( $script_matches[0] );
+        // Safety net: strip anything from <noscript onwards in case it bled in.
+        $script_tag = preg_replace( '/<noscript[\s\S]*/i', '', $script_tag );
+        $script_tag = lfv2_sanitize_script( trim( $script_tag ) );
     }
 
-    // Extract the <noscript>...</noscript> portion.
+    // Extract <noscript>...</noscript> only.
     $noscript_tag = '';
     if ( preg_match( '/<noscript[\s\S]*?<\/noscript>/i', $legacy, $noscript_matches ) ) {
-        $noscript_tag = trim( $noscript_matches[0] );
+        // Safety net: strip anything from <script onwards in case it bled in.
+        $noscript_tag = preg_replace( '/<script[\s\S]*/i', '', $noscript_matches[0] );
+        $noscript_tag = trim( $noscript_tag );
     }
 
-    // If we could not split cleanly, save the whole thing as the script tag
-    // so the customer at least has their code and can correct it manually.
+    // If split failed entirely, save the whole thing to script field so
+    // code is not lost — customer can correct manually.
     if ( empty( $script_tag ) && ! empty( $legacy ) ) {
         $script_tag = lfv2_sanitize_script( $legacy );
     }
 
-    // Save the migrated values.
     if ( ! empty( $script_tag ) ) {
         update_option( LFV2_SCRIPT_TAG, $script_tag );
     }
@@ -80,20 +79,11 @@ function lfv2_migrate_legacy_code() {
         update_option( LFV2_NOSCRIPT_TAG, $noscript_tag );
     }
 
-    // Delete the old option so the old code cannot be injected
-    // by any remaining reference to the legacy plugin.
     delete_option( 'lfr_options' );
-
-    // Record that migration ran so we can show a notice in the admin.
     update_option( 'lfv2_migrated', '1' );
 }
 
 // ── Upgrade migration (runs on admin page load) ────────
-// register_activation_hook does not fire on plugin updates,
-// only on fresh activations. This catches existing users who
-// update via the WordPress dashboard without re-activating.
-// Also catches users who landed on 3.5.1 before migration
-// logic had the correct option name.
 
 add_action( 'admin_init', 'lfv2_maybe_migrate' );
 
@@ -102,11 +92,10 @@ function lfv2_maybe_migrate() {
     $old_code        = isset( $old_values['lfr_tracking_code'] ) ? $old_values['lfr_tracking_code'] : '';
     $current_version = get_option( 'lfv2_db_version', '0' );
 
-    if ( $old_code !== '' || version_compare( $current_version, '3.5.2', '<' ) ) {
+    if ( $old_code !== '' || version_compare( $current_version, '3.5.3', '<' ) ) {
         lfv2_migrate_legacy_code();
     }
 
-    // Store the current version so we can detect future upgrades.
     update_option( 'lfv2_db_version', LFV2_VERSION );
 }
 
@@ -163,19 +152,45 @@ function lfv2_register_settings() {
     );
 }
 
-// ── Sanitise script tag (strips async/defer) ───────────
+// ── Sanitise script tag ────────────────────────────────
+// Strips async/defer and rejects input containing a noscript tag.
 
 function lfv2_sanitize_script( $input ) {
     $input = trim( $input );
+
+    // Guardrail: reject if a <noscript> tag is present.
+    if ( preg_match( '/<noscript/i', $input ) ) {
+        add_settings_error(
+            LFV2_SCRIPT_TAG,
+            'noscript_in_script',
+            __( 'The Script Tag field should only contain your &lt;script&gt; tag. It looks like your &lt;noscript&gt; tag is in here too. Please paste the noscript tag into the Noscript Tag field below and remove it from this field.', 'lead-forensics' )
+        );
+        // Return the existing saved value so nothing is overwritten.
+        return get_option( LFV2_SCRIPT_TAG, '' );
+    }
+
     $input = preg_replace( '/\s+async/i', '', $input );
     $input = preg_replace( '/\s+defer/i', '', $input );
     return $input;
 }
 
 // ── Sanitise noscript tag ──────────────────────────────
+// Rejects input containing a script tag.
 
 function lfv2_sanitize_noscript( $input ) {
-    return trim( $input );
+    $input = trim( $input );
+
+    // Guardrail: reject if a <script> tag is present.
+    if ( preg_match( '/<script/i', $input ) ) {
+        add_settings_error(
+            LFV2_NOSCRIPT_TAG,
+            'script_in_noscript',
+            __( 'The Noscript Tag field should only contain your &lt;noscript&gt; tag. It looks like your &lt;script&gt; tag is in here too. Please paste the script tag into the Script Tag field above and remove it from this field.', 'lead-forensics' )
+        );
+        return get_option( LFV2_NOSCRIPT_TAG, '' );
+    }
+
+    return $input;
 }
 
 // ── Enqueue admin CSS ──────────────────────────────────
@@ -226,12 +241,15 @@ function lfv2_settings_page() {
 
                 <?php if ( get_option( 'lfv2_migrated' ) === '1' ) : ?>
                 <div class="lf-notice lf-notice--migrated">
-                    <span>&#10003;</span> <?php esc_html_e( 'Your tracking code has been automatically carried over from the previous plugin version and is live. Please check the fields below to confirm everything looks correct.', 'lead-forensics' ); ?>
+                    <span>&#10003;</span> <?php esc_html_e( 'Your tracking code has been automatically carried over from the previous plugin version and is live. Please check both fields below to confirm everything looks correct.', 'lead-forensics' ); ?>
                 </div>
                 <?php delete_option( 'lfv2_migrated' ); ?>
                 <?php endif; ?>
 
-                <?php if ( $saved ) : ?>
+                <?php settings_errors( LFV2_SCRIPT_TAG ); ?>
+                <?php settings_errors( LFV2_NOSCRIPT_TAG ); ?>
+
+                <?php if ( $saved && ! get_settings_errors( LFV2_SCRIPT_TAG ) && ! get_settings_errors( LFV2_NOSCRIPT_TAG ) ) : ?>
                 <div class="lf-notice">
                     <span>&#10003;</span> <?php esc_html_e( 'Settings saved. Your tracking code is live.', 'lead-forensics' ); ?>
                 </div>
@@ -244,7 +262,7 @@ function lfv2_settings_page() {
                         <div class="lf-card__header">
                             <h2><?php esc_html_e( 'Tracking Code Setup', 'lead-forensics' ); ?></h2>
                             <p>
-                                <?php esc_html_e( 'Add your Lead Forensics tracking snippets below.', 'lead-forensics' ); ?>
+                                <?php esc_html_e( 'Your tracking code has two separate parts. Paste each one into the correct field below.', 'lead-forensics' ); ?>
                                 <a href="https://portal.leadforensics.com/TrackingCode" target="_blank" rel="noopener noreferrer">
                                     <?php esc_html_e( 'Get your tracking code', 'lead-forensics' ); ?> &rarr;
                                 </a>
@@ -258,14 +276,14 @@ function lfv2_settings_page() {
                                     <span class="lf-badge lf-badge--head">&lt;head&gt;</span>
                                 </label>
                                 <p class="lf-hint">
-                                    <?php esc_html_e( 'Paste the full script tag from your portal. async and defer attributes are stripped automatically to ensure accurate tracking.', 'lead-forensics' ); ?>
+                                    <?php esc_html_e( 'Paste the first line of your tracking code here — the line that starts with &lt;script and ends with &lt;/script&gt;. Do not include the noscript tag in this field.', 'lead-forensics' ); ?>
                                 </p>
                                 <textarea
                                     id="lfv2_script_tag"
                                     name="<?php echo esc_attr( LFV2_SCRIPT_TAG ); ?>"
                                     rows="5"
                                     spellcheck="false"
-                                    placeholder="&lt;script&gt;...&lt;/script&gt;"
+                                    placeholder="&lt;script type=&quot;text/javascript&quot; src=&quot;...&quot;&gt;&lt;/script&gt;"
                                 ><?php echo esc_textarea( $script_tag ); ?></textarea>
                                 <?php if ( ! empty( $script_tag ) ) : ?>
                                 <div class="lf-preview">
@@ -281,14 +299,14 @@ function lfv2_settings_page() {
                                     <span class="lf-badge lf-badge--body">&lt;body&gt;</span>
                                 </label>
                                 <p class="lf-hint">
-                                    <?php esc_html_e( 'Paste the full noscript tag. This provides a fallback for visitors who have JavaScript disabled.', 'lead-forensics' ); ?>
+                                    <?php esc_html_e( 'Paste the second line of your tracking code here — the line that starts with &lt;noscript and ends with &lt;/noscript&gt;. Do not include the script tag in this field.', 'lead-forensics' ); ?>
                                 </p>
                                 <textarea
                                     id="lfv2_noscript_tag"
                                     name="<?php echo esc_attr( LFV2_NOSCRIPT_TAG ); ?>"
                                     rows="3"
                                     spellcheck="false"
-                                    placeholder="&lt;noscript&gt;...&lt;/noscript&gt;"
+                                    placeholder="&lt;noscript&gt;&lt;img src=&quot;...&quot; /&gt;&lt;/noscript&gt;"
                                 ><?php echo esc_textarea( $noscript_tag ); ?></textarea>
                             </div>
 

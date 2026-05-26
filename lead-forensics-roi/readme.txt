@@ -3,7 +3,7 @@ Contributors: leadforensics
 Tags: lead forensics, tracking, b2b, analytics, visitor tracking
 Requires at least: 5.2
 Tested up to: 6.5
-Stable tag: 3.5.2
+Stable tag: 3.5.3
 Requires PHP: 5.6
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
@@ -65,6 +65,11 @@ No. The plugin stores only the two tracking code snippets you paste in (in your 
 2. Active status shown once tracking codes are configured.
 
 == Changelog ==
+
+= 3.5.3 =
+* Fixed migration split to correctly separate script and noscript tags
+* Added validation to prevent noscript tag being saved in script field and vice versa
+* Improved hint text and placeholders to make field requirements clearer
 
 
 = 3.5.1 =
