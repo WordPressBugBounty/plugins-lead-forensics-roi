@@ -1,11 +1,12 @@
 <?php
 /**
  * Plugin Name: Lead Forensics
- * Plugin URI:  https://www.leadforensics.com
- * Description: Adds the Lead Forensics tracking script to your WordPress site. Correctly places the script tag in the head and noscript tag after the body open tag, without async or defer.
- * Version:     3.5.3
+ * Plugin URI:  https://wordpress.org/plugins/lead-forensics-roi/
+ * Description: Lead Forensics allows you to Turn your anonymous website visitors into sales leads, convert new business opportunities before your competitors and increase your online ROI. This plugin allows you to easily add your tracking code from Lead Forensics to the head of your WordPress site
+ * Version:     3.6.0
  * Author:      Lead Forensics
- * Author URI:  https://www.leadforensics.com
+ * Author URI:  https://www.leadforensics.com/
+ * Author Email: wordpress-plugin-support@leadforensics.com
  * License:     GPL-2.0+
  * License URI: https://www.gnu.org/licenses/gpl-2.0.html
  * Text Domain: lead-forensics
@@ -15,391 +16,242 @@ if ( ! defined( 'ABSPATH' ) ) {
     exit;
 }
 
-define( 'LFV2_VERSION', '3.5.3' );
-define( 'LFV2_PLUGIN_URL', plugin_dir_url( __FILE__ ) );
-define( 'LFV2_PLUGIN_BASENAME', plugin_basename( __FILE__ ) );
-define( 'LFV2_SCRIPT_TAG', 'lfv2_script_tag' );
-define( 'LFV2_NOSCRIPT_TAG', 'lfv2_noscript_tag' );
+define( 'LF360_VERSION', '3.6.0' );
+define( 'LF360_PLUGIN_BASENAME', plugin_basename( __FILE__ ) );
+define( 'LF360_OPTION', 'lfr_options' );
+define( 'LF360_OPTION_KEY', 'lfr_tracking_code' );
 
-// ── Activation: migrate from old plugin ───────────────
+// ── Activation ─────────────────────────────────────────
 
-register_activation_hook( __FILE__, 'lfv2_activate' );
+register_activation_hook( __FILE__, 'lf360_activate' );
 
-function lfv2_activate() {
-    lfv2_migrate_legacy_code();
+function lf360_activate() {
+    lf360_migrate();
 }
 
-function lfv2_migrate_legacy_code() {
+// ── Upgrade migration ──────────────────────────────────
+// Handles all upgrade and downgrade paths:
+//
+// 3.3.11 / 3.4.0 / 3.5.0 / 3.5.1
+//   lfr_options intact — nothing to migrate.
+//
+// 3.5.2 / 3.5.3 / 3.5.4
+//   lfr_options was deleted. Code is split across lfv2_script_tag
+//   and lfv2_noscript_tag. Recombine and restore lfr_options.
 
-    $old_values = get_option( 'lfr_options', array() );
-    $legacy     = isset( $old_values['lfr_tracking_code'] ) ? $old_values['lfr_tracking_code'] : '';
+add_action( 'admin_init', 'lf360_migrate' );
 
-    if ( empty( $legacy ) ) {
+function lf360_migrate() {
+
+    // If lfr_options already has content nothing to migrate.
+    $existing      = get_option( LF360_OPTION, array() );
+    $existing_code = isset( $existing[ LF360_OPTION_KEY ] ) ? $existing[ LF360_OPTION_KEY ] : '';
+
+    if ( ! empty( $existing_code ) ) {
+        lf360_cleanup_v2();
         return;
     }
 
-    $existing_script   = get_option( LFV2_SCRIPT_TAG, '' );
-    $existing_noscript = get_option( LFV2_NOSCRIPT_TAG, '' );
-
-    // Don't overwrite if customer has already configured the new plugin.
-    if ( ! empty( $existing_script ) || ! empty( $existing_noscript ) ) {
-        return;
-    }
-
-    $legacy = trim( $legacy );
-
-    // Extract <script>...</script> only — stop strictly at </script>.
-    $script_tag = '';
-    if ( preg_match( '/<script[^>]*>.*?<\/script>/is', $legacy, $script_matches ) ) {
-        $script_tag = trim( $script_matches[0] );
-        // Safety net: strip anything from <noscript onwards in case it bled in.
-        $script_tag = preg_replace( '/<noscript[\s\S]*/i', '', $script_tag );
-        $script_tag = lfv2_sanitize_script( trim( $script_tag ) );
-    }
-
-    // Extract <noscript>...</noscript> only.
-    $noscript_tag = '';
-    if ( preg_match( '/<noscript[\s\S]*?<\/noscript>/i', $legacy, $noscript_matches ) ) {
-        // Safety net: strip anything from <script onwards in case it bled in.
-        $noscript_tag = preg_replace( '/<script[\s\S]*/i', '', $noscript_matches[0] );
-        $noscript_tag = trim( $noscript_tag );
-    }
-
-    // If split failed entirely, save the whole thing to script field so
-    // code is not lost — customer can correct manually.
-    if ( empty( $script_tag ) && ! empty( $legacy ) ) {
-        $script_tag = lfv2_sanitize_script( $legacy );
-    }
+    // Check for code in split fields written by 3.5.2 through 3.5.4.
+    $script_tag   = get_option( 'lfv2_script_tag', '' );
+    $noscript_tag = get_option( 'lfv2_noscript_tag', '' );
 
     if ( ! empty( $script_tag ) ) {
-        update_option( LFV2_SCRIPT_TAG, $script_tag );
+        $combined = trim( $script_tag );
+        if ( ! empty( $noscript_tag ) ) {
+            $combined .= "\n" . trim( $noscript_tag );
+        }
+        update_option( LF360_OPTION, array( LF360_OPTION_KEY => $combined ) );
+        update_option( 'lf360_migrated', '1' );
     }
 
-    if ( ! empty( $noscript_tag ) ) {
-        update_option( LFV2_NOSCRIPT_TAG, $noscript_tag );
-    }
-
-    delete_option( 'lfr_options' );
-    update_option( 'lfv2_migrated', '1' );
+    lf360_cleanup_v2();
 }
 
-// ── Upgrade migration (runs on admin page load) ────────
+function lf360_cleanup_v2() {
+    delete_option( 'lfv2_script_tag' );
+    delete_option( 'lfv2_noscript_tag' );
+    delete_option( 'lfv2_db_version' );
+    delete_option( 'lfv2_migrated' );
+    delete_option( 'lfv2_perf_exclude' );
+}
 
-add_action( 'admin_init', 'lfv2_maybe_migrate' );
+// ── Very old version migration (pre 3.3.11) ────────────
 
-function lfv2_maybe_migrate() {
-    $old_values      = get_option( 'lfr_options', array() );
-    $old_code        = isset( $old_values['lfr_tracking_code'] ) ? $old_values['lfr_tracking_code'] : '';
-    $current_version = get_option( 'lfv2_db_version', '0' );
+add_action( 'plugins_loaded', 'lf360_rename_variables' );
 
-    if ( $old_code !== '' || version_compare( $current_version, '3.5.3', '<' ) ) {
-        lfv2_migrate_legacy_code();
+function lf360_rename_variables() {
+    if ( ! current_user_can( 'manage_options' ) ) {
+        return;
     }
 
-    update_option( 'lfv2_db_version', LFV2_VERSION );
+    $new_values = get_site_option( LF360_OPTION, true );
+    $new_script = isset( $new_values[ LF360_OPTION_KEY ] ) ? $new_values[ LF360_OPTION_KEY ] : '';
+
+    if ( $new_script === '' ) {
+        $old_values = get_site_option( 'my_option_name', true );
+        $old_script = isset( $old_values['script_textarea'] ) ? $old_values['script_textarea'] : '';
+
+        if ( $old_script !== '' ) {
+            $new_value = array( LF360_OPTION_KEY => $old_script );
+            update_option( LF360_OPTION, $new_value, true );
+        }
+    }
 }
 
 // ── Bootstrap ──────────────────────────────────────────
 
-add_action( 'plugins_loaded', 'lfv2_init' );
+add_action( 'plugins_loaded', 'lf360_init' );
 
-function lfv2_init() {
-    add_filter( 'plugin_action_links_' . LFV2_PLUGIN_BASENAME, 'lfv2_add_settings_link' );
+function lf360_init() {
+    add_filter( 'plugin_action_links_' . LF360_PLUGIN_BASENAME, 'lf360_add_settings_link' );
 }
 
 // ── Admin menu ─────────────────────────────────────────
 
-add_action( 'admin_menu', 'lfv2_add_menu' );
+add_action( 'admin_menu', 'lf360_add_plugin_page' );
 
-function lfv2_add_menu() {
+function lf360_add_plugin_page() {
     add_options_page(
-        __( 'Lead Forensics', 'lead-forensics' ),
-        __( 'Lead Forensics', 'lead-forensics' ),
+        'Settings Admin',
+        'Lead Forensics',
         'manage_options',
-        'lead-forensics-roi',
-        'lfv2_settings_page'
+        'lfr_settings',
+        'lf360_create_admin_page'
     );
 }
 
 // ── Settings link in plugin list ───────────────────────
 
-function lfv2_add_settings_link( $links ) {
-    $settings_link = '<a href="' . esc_url( admin_url( 'options-general.php?page=lead-forensics-roi' ) ) . '">' . __( 'Settings', 'lead-forensics' ) . '</a>';
-    array_unshift( $links, $settings_link );
-    return $links;
+function lf360_add_settings_link( $links ) {
+    $lfr_admin_links = array(
+        '<a href="' . admin_url( 'options-general.php?page=lfr_settings' ) . '">Settings</a>',
+    );
+    return array_merge( $links, $lfr_admin_links );
 }
 
 // ── Register settings ──────────────────────────────────
 
-add_action( 'admin_init', 'lfv2_register_settings' );
+add_action( 'admin_init', 'lf360_page_init' );
 
-function lfv2_register_settings() {
+function lf360_page_init() {
     register_setting(
-        'lfv2_group',
-        LFV2_SCRIPT_TAG,
-        array(
-            'sanitize_callback' => 'lfv2_sanitize_script',
-            'default'           => '',
-        )
+        'lfr_option_group',
+        LF360_OPTION,
+        'lf360_sanitize'
     );
-    register_setting(
-        'lfv2_group',
-        LFV2_NOSCRIPT_TAG,
-        array(
-            'sanitize_callback' => 'lfv2_sanitize_noscript',
-            'default'           => '',
-        )
+
+    add_settings_section(
+        'lfr_setting_section',
+        'Lead Forensics',
+        'lf360_print_section_info',
+        'lfr-setting-admin'
+    );
+
+    add_settings_field(
+        LF360_OPTION_KEY,
+        '',
+        'lf360_script_textarea',
+        'lfr-setting-admin',
+        'lfr_setting_section'
     );
 }
 
-// ── Sanitise script tag ────────────────────────────────
-// Strips async/defer and rejects input containing a noscript tag.
-
-function lfv2_sanitize_script( $input ) {
-    $input = trim( $input );
-
-    // Guardrail: reject if a <noscript> tag is present.
-    if ( preg_match( '/<noscript/i', $input ) ) {
-        add_settings_error(
-            LFV2_SCRIPT_TAG,
-            'noscript_in_script',
-            __( 'The Script Tag field should only contain your &lt;script&gt; tag. It looks like your &lt;noscript&gt; tag is in here too. Please paste the noscript tag into the Noscript Tag field below and remove it from this field.', 'lead-forensics' )
-        );
-        // Return the existing saved value so nothing is overwritten.
-        return get_option( LFV2_SCRIPT_TAG, '' );
+function lf360_sanitize( $input ) {
+    $new_input = array();
+    if ( isset( $input[ LF360_OPTION_KEY ] ) ) {
+        $new_input[ LF360_OPTION_KEY ] = trim( $input[ LF360_OPTION_KEY ] );
     }
-
-    $input = preg_replace( '/\s+async/i', '', $input );
-    $input = preg_replace( '/\s+defer/i', '', $input );
-    return $input;
-}
-
-// ── Sanitise noscript tag ──────────────────────────────
-// Rejects input containing a script tag.
-
-function lfv2_sanitize_noscript( $input ) {
-    $input = trim( $input );
-
-    // Guardrail: reject if a <script> tag is present.
-    if ( preg_match( '/<script/i', $input ) ) {
-        add_settings_error(
-            LFV2_NOSCRIPT_TAG,
-            'script_in_noscript',
-            __( 'The Noscript Tag field should only contain your &lt;noscript&gt; tag. It looks like your &lt;script&gt; tag is in here too. Please paste the script tag into the Script Tag field above and remove it from this field.', 'lead-forensics' )
-        );
-        return get_option( LFV2_NOSCRIPT_TAG, '' );
-    }
-
-    return $input;
-}
-
-// ── Enqueue admin CSS ──────────────────────────────────
-
-add_action( 'admin_enqueue_scripts', 'lfv2_enqueue_styles' );
-
-function lfv2_enqueue_styles( $hook ) {
-    if ( 'settings_page_lead-forensics-roi' !== $hook ) {
-        return;
-    }
-    wp_enqueue_style(
-        'lfv2-admin',
-        LFV2_PLUGIN_URL . 'assets/admin.css',
-        array(),
-        LFV2_VERSION
-    );
+    return $new_input;
 }
 
 // ── Settings page HTML ─────────────────────────────────
+// Copied from 3.3.11 exactly.
 
-function lfv2_settings_page() {
-    if ( ! current_user_can( 'manage_options' ) ) {
-        return;
+function lf360_create_admin_page() {
+    $options = get_option( LF360_OPTION );
+
+    if ( get_option( 'lf360_migrated' ) === '1' ) {
+        echo '<div class="notice notice-success is-dismissible"><p><strong>Your tracking code has been automatically carried over from the previous plugin version and is live.</strong> Please check the field below to confirm everything looks correct.</p></div>';
+        delete_option( 'lf360_migrated' );
     }
-
-    $script_tag    = get_option( LFV2_SCRIPT_TAG, '' );
-    $noscript_tag  = get_option( LFV2_NOSCRIPT_TAG, '' );
-    $saved         = isset( $_GET['settings-updated'] ) && '1' === $_GET['settings-updated'];
-    $is_configured = ! empty( $script_tag );
-    $status_class  = $is_configured ? 'lf-status--active' : 'lf-status--inactive';
-    $status_label  = $is_configured ? __( 'Tracking Active', 'lead-forensics' ) : __( 'Not Configured', 'lead-forensics' );
     ?>
-    <div class="lf-wrap">
-
-        <div class="lf-header">
-            <div>
-                <div class="lf-header__title">Lead Forensics</div>
-                <div class="lf-header__sub">Tracking Code Manager</div>
-            </div>
-            <div class="lf-status <?php echo esc_attr( $status_class ); ?>">
-                <span class="lf-status__dot"></span>
-                <?php echo esc_html( $status_label ); ?>
-            </div>
-        </div>
-
-        <div class="lf-body">
-            <div class="lf-main">
-
-                <?php if ( get_option( 'lfv2_migrated' ) === '1' ) : ?>
-                <div class="lf-notice lf-notice--migrated">
-                    <span>&#10003;</span> <?php esc_html_e( 'Your tracking code has been automatically carried over from the previous plugin version and is live. Please check both fields below to confirm everything looks correct.', 'lead-forensics' ); ?>
-                </div>
-                <?php delete_option( 'lfv2_migrated' ); ?>
-                <?php endif; ?>
-
-                <?php settings_errors( LFV2_SCRIPT_TAG ); ?>
-                <?php settings_errors( LFV2_NOSCRIPT_TAG ); ?>
-
-                <?php if ( $saved && ! get_settings_errors( LFV2_SCRIPT_TAG ) && ! get_settings_errors( LFV2_NOSCRIPT_TAG ) ) : ?>
-                <div class="lf-notice">
-                    <span>&#10003;</span> <?php esc_html_e( 'Settings saved. Your tracking code is live.', 'lead-forensics' ); ?>
-                </div>
-                <?php endif; ?>
-
-                <form method="post" action="options.php">
-                    <?php settings_fields( 'lfv2_group' ); ?>
-
-                    <div class="lf-card">
-                        <div class="lf-card__header">
-                            <h2><?php esc_html_e( 'Tracking Code Setup', 'lead-forensics' ); ?></h2>
-                            <p>
-                                <?php esc_html_e( 'Your tracking code has two separate parts. Paste each one into the correct field below.', 'lead-forensics' ); ?>
-                                <a href="https://portal.leadforensics.com/TrackingCode" target="_blank" rel="noopener noreferrer">
-                                    <?php esc_html_e( 'Get your tracking code', 'lead-forensics' ); ?> &rarr;
-                                </a>
-                            </p>
-                        </div>
-                        <div class="lf-card__body">
-
-                            <div class="lf-field">
-                                <label for="lfv2_script_tag">
-                                    <?php esc_html_e( 'Script Tag', 'lead-forensics' ); ?>
-                                    <span class="lf-badge lf-badge--head">&lt;head&gt;</span>
-                                </label>
-                                <p class="lf-hint">
-                                    <?php esc_html_e( 'Paste the first line of your tracking code here — the line that starts with &lt;script and ends with &lt;/script&gt;. Do not include the noscript tag in this field.', 'lead-forensics' ); ?>
-                                </p>
-                                <textarea
-                                    id="lfv2_script_tag"
-                                    name="<?php echo esc_attr( LFV2_SCRIPT_TAG ); ?>"
-                                    rows="5"
-                                    spellcheck="false"
-                                    placeholder="&lt;script type=&quot;text/javascript&quot; src=&quot;...&quot;&gt;&lt;/script&gt;"
-                                ><?php echo esc_textarea( $script_tag ); ?></textarea>
-                                <?php if ( ! empty( $script_tag ) ) : ?>
-                                <div class="lf-preview">
-                                    <span><?php esc_html_e( 'Will inject as:', 'lead-forensics' ); ?></span>
-                                    <code><?php echo esc_html( lfv2_sanitize_script( $script_tag ) ); ?></code>
-                                </div>
-                                <?php endif; ?>
-                            </div>
-
-                            <div class="lf-field">
-                                <label for="lfv2_noscript_tag">
-                                    <?php esc_html_e( 'Noscript Tag', 'lead-forensics' ); ?>
-                                    <span class="lf-badge lf-badge--body">&lt;body&gt;</span>
-                                </label>
-                                <p class="lf-hint">
-                                    <?php esc_html_e( 'Paste the second line of your tracking code here — the line that starts with &lt;noscript and ends with &lt;/noscript&gt;. Do not include the script tag in this field.', 'lead-forensics' ); ?>
-                                </p>
-                                <textarea
-                                    id="lfv2_noscript_tag"
-                                    name="<?php echo esc_attr( LFV2_NOSCRIPT_TAG ); ?>"
-                                    rows="3"
-                                    spellcheck="false"
-                                    placeholder="&lt;noscript&gt;&lt;img src=&quot;...&quot; /&gt;&lt;/noscript&gt;"
-                                ><?php echo esc_textarea( $noscript_tag ); ?></textarea>
-                            </div>
-
-                        </div>
-                        <div class="lf-card__footer">
-                            <?php submit_button( __( 'Save Changes', 'lead-forensics' ), 'primary', 'submit', false, array( 'class' => 'lf-btn' ) ); ?>
-                        </div>
-                    </div>
-
-                </form>
-            </div>
-
-            <div class="lf-sidebar">
-
-                <div class="lf-promo">
-                    <p class="lf-promo__eyebrow"><?php esc_html_e( 'World-leading B2B software', 'lead-forensics' ); ?></p>
-                    <h3 class="lf-promo__heading"><?php esc_html_e( 'Identify your anonymous website visitors', 'lead-forensics' ); ?></h3>
-                    <p class="lf-promo__body"><?php esc_html_e( 'Lead Forensics reveals the businesses visiting your website so your teams can act on high-intent opportunities in real time.', 'lead-forensics' ); ?></p>
-                    <a href="https://www.leadforensics.com/how-it-works/" target="_blank" rel="noopener noreferrer" class="lf-promo__link">
-                        <?php esc_html_e( 'See how it works', 'lead-forensics' ); ?> &rarr;
-                    </a>
-                </div>
-
-                <div class="lf-card">
-                    <div class="lf-card__header"><h3><?php esc_html_e( 'What is Lead Forensics?', 'lead-forensics' ); ?></h3></div>
-                    <div class="lf-card__body">
-                        <div class="lf-video">
-                            <iframe
-                                src="https://www.youtube.com/embed/Ttcrv9VgLL4"
-                                title="<?php esc_attr_e( 'What is Lead Forensics?', 'lead-forensics' ); ?>"
-                                frameborder="0"
-                                allowfullscreen
-                            ></iframe>
-                        </div>
-                    </div>
-                </div>
-
-                <div class="lf-card lf-card--links">
-                    <div class="lf-card__header"><h3><?php esc_html_e( 'Quick links', 'lead-forensics' ); ?></h3></div>
-                    <div class="lf-card__body">
-                        <ul>
-                            <li><a href="https://portal.leadforensics.com/TrackingCode" target="_blank" rel="noopener noreferrer"><?php esc_html_e( 'Get Tracking Code', 'lead-forensics' ); ?> &#8599;</a></li>
-                            <li><a href="https://portal.leadforensics.com" target="_blank" rel="noopener noreferrer"><?php esc_html_e( 'LF Portal', 'lead-forensics' ); ?> &#8599;</a></li>
-                            <li><a href="https://www.leadforensics.com/how-it-works/" target="_blank" rel="noopener noreferrer"><?php esc_html_e( 'How it Works', 'lead-forensics' ); ?> &#8599;</a></li>
-                            <li><a href="https://www.leadforensics.com/privacy-policy/" target="_blank" rel="noopener noreferrer"><?php esc_html_e( 'Privacy Policy', 'lead-forensics' ); ?> &#8599;</a></li>
-                        </ul>
-                    </div>
-                </div>
-
-            </div>
-        </div>
-
+    <div class="wrap">
+        <h2>Lead Forensics Tracking</h2>
+        <form method="post" action="options.php">
+            <?php
+            settings_fields( 'lfr_option_group' );
+            do_settings_sections( 'lfr-setting-admin' );
+            submit_button();
+            lf360_print_section_info_video();
+            ?>
+        </form>
     </div>
     <?php
 }
 
-// ── Frontend: script tag into <head> ───────────────────
-
-add_action( 'wp_head', 'lfv2_inject_script', 1 );
-
-function lfv2_inject_script() {
-    $tag = get_option( LFV2_SCRIPT_TAG, '' );
-    if ( empty( $tag ) ) {
-        return;
-    }
-    $allowed = array(
-        'script' => array(
-            'type' => true,
-            'src'  => true,
-            'id'   => true,
-        ),
-    );
-    echo "\n" . wp_kses( lfv2_sanitize_script( $tag ), $allowed ) . "\n"; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped
+function lf360_print_section_info() {
+    print '<a href="http://www.leadforensics.com" target="_blank">Lead Forensics </a> is a B2B tool used to identify the unidentified visitors that visit your website.<br/>
+               This Plugin will assist you in placing the <a href="https://portal.leadforensics.com/TrackingCode" target="blank">Tracking Code </a> into your WordPress site or blog.<br/><br/>
+               <strong>Enter your Lead Forensics code below</strong><br/>';
 }
 
-// ── Frontend: noscript tag immediately after <body> ────
+function lf360_script_textarea() {
+    $options           = get_option( LF360_OPTION );
+    $lfr_tracking_code = isset( $options[ LF360_OPTION_KEY ] ) ? esc_attr( $options[ LF360_OPTION_KEY ] ) : '';
+    $safe_text         = apply_filters( 'esc_textarea', $lfr_tracking_code );
+    ?>
+    <textarea cols="75" rows="15" name="<?php echo esc_attr( LF360_OPTION ) . '[' . esc_attr( LF360_OPTION_KEY ) . ']'; ?>" type="textarea"><?php echo trim( $safe_text ); ?></textarea>
+    <?php
+}
 
-add_action( 'wp_body_open', 'lfv2_inject_noscript', 1 );
+function lf360_print_section_info_video() {
+    echo '<div class="textare_descrption">
+                <h1>About Lead Forensics</h1>
+                <div class="video_cover">
+                    <iframe width="560" height="315" src="https://www.youtube.com/embed/cWOONn32qtM" frameborder="0" allowfullscreen></iframe>
+                </div>
+            </div>';
+}
 
-function lfv2_inject_noscript() {
-    $tag = get_option( LFV2_NOSCRIPT_TAG, '' );
-    if ( empty( $tag ) ) {
+// ── Check user has permission ──────────────────────────
+
+add_action( 'admin_init', 'lf360_plugin_settings_page_permission' );
+
+function lf360_plugin_settings_page_permission() {
+    if ( ! current_user_can( 'manage_options' ) ) {
         return;
     }
-    $allowed = array(
-        'noscript' => array(),
-        'img'      => array(
-            'src'    => true,
-            'width'  => true,
-            'height' => true,
-            'alt'    => true,
-            'style'  => true,
-        ),
-    );
-    echo "\n" . wp_kses( $tag, $allowed ) . "\n"; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped
+}
+
+// ── Admin JS (fixes textarea layout — copied from 3.3.11) ──
+
+add_action( 'admin_head', 'lf360_admin_js' );
+
+function lf360_admin_js() {
+    global $current_screen;
+    $settings_page = $current_screen->base;
+    if ( $settings_page == 'settings_page_lfr_settings' ) {
+        wp_register_script( 'lfr-scripts', plugin_dir_url( __FILE__ ) . 'js/custom.js' );
+        wp_enqueue_script( 'lfr-scripts' );
+        wp_localize_script( 'lfr-scripts', 'wp_ajax', array( 'ajaxurl' => admin_url( 'admin-ajax.php' ) ) );
+    }
+}
+
+// ── Frontend: inject tracking code into <head> ─────────
+// Matches 3.3.11 exactly — raw echo at default priority 10.
+
+add_action( 'wp_head', 'lf360_custom_js' );
+
+function lf360_custom_js() {
+    $get_all_value_array = get_option( LF360_OPTION, true );
+    $lfr_tracking_code   = isset( $get_all_value_array[ LF360_OPTION_KEY ] ) ? $get_all_value_array[ LF360_OPTION_KEY ] : '';
+
+    if ( $lfr_tracking_code !== '' ) {
+        $safe_text = apply_filters( 'esc_textarea', $lfr_tracking_code );
+
+        if ( ! empty( $safe_text ) ) {
+            echo trim( htmlspecialchars_decode( $safe_text ) ); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped
+        }
+    }
 }

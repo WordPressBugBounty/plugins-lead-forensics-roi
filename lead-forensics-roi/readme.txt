@@ -3,106 +3,74 @@ Contributors: leadforensics
 Tags: lead forensics, tracking, b2b, analytics, visitor tracking
 Requires at least: 5.2
 Tested up to: 6.5
-Stable tag: 3.5.3
+Stable tag: 3.6.0
 Requires PHP: 5.6
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
-Adds the Lead Forensics tracking script to your WordPress site — correctly, without async or defer.
+Easily add your Lead Forensics tracking code to your WordPress site.
 
 == Description ==
 
-The official Lead Forensics plugin for WordPress. It places your tracking code exactly where it needs to be:
+The official Lead Forensics plugin for WordPress. Paste your tracking code into the settings page and the plugin handles placement automatically.
 
-* **Script tag** injected into `<head>` — synchronously, without `async` or `defer`, ensuring Lead Forensics and dependent tools like LF Chat load correctly.
-* **Noscript tag** injected immediately after the opening `<body>` tag — the correct position per the HTML specification.
-
-**Why does placement matter?**
-
-Many WordPress performance plugins add `async` or `defer` to any script they find. This breaks Lead Forensics tracking and any tools that depend on the visitor data it provides. This plugin bypasses the WordPress enqueue system entirely, giving you reliable, consistent injection every time.
-
-**Features**
-
-* Separate fields for Script Tag and Noscript Tag
-* Automatic stripping of `async` and `defer` attributes on save
-* Live preview of exactly what will be injected
-* Tracking status indicator — see at a glance whether your code is configured
-* Direct link to your tracking code in the Lead Forensics portal
+* Tracking code injected into the head of every page
+* No async or defer added to the script
+* Simple single field entry matching the tracking code format from the Lead Forensics portal
 
 == Installation ==
 
-1. Upload the `lead-forensics-roi` folder to `/wp-content/plugins/`
-2. Activate the plugin via **Plugins** in WordPress admin
-3. Go to **Settings → Lead Forensics**
-4. Paste your Script Tag and Noscript Tag from the [Lead Forensics portal](https://portal.leadforensics.com/TrackingCode)
-5. Click **Save Changes**
+1. Upload the plugin folder to /wp-content/plugins/
+2. Activate the plugin via Plugins in WordPress admin
+3. Go to Settings > Lead Forensics
+4. Paste your tracking code from the Lead Forensics portal
+5. Click Save Changes
 
 == Frequently Asked Questions ==
 
 = Where do I find my tracking code? =
 
-Log in to your [Lead Forensics portal](https://portal.leadforensics.com/TrackingCode) and navigate to Settings → Tracking Code.
-
-= Why are there two separate fields? =
-
-The script tag must go in `<head>` and the noscript tag must go immediately after `<body>`. Putting both in the head (as some plugins do) is invalid HTML and causes inconsistent behaviour across browsers.
-
-= Will this work with caching or performance plugins? =
-
-Yes. Because we bypass `wp_enqueue_script()` and echo directly into the relevant hooks, caching and optimisation plugins cannot modify or defer our output.
-
-= My theme doesn't support wp_body_open — will the noscript tag still work? =
-
-The noscript tag requires your theme to call `wp_body_open()`. All themes from WordPress 5.2 onwards support this. If your theme does not call it, the noscript tag will not render — however this will not break your tracking, as the noscript tag is only a fallback for visitors without JavaScript.
+Log in to your Lead Forensics portal and navigate to Settings > Tracking Code.
 
 = Does the plugin collect any data? =
 
-No. The plugin stores only the two tracking code snippets you paste in (in your own WordPress database). It does not collect, transmit, or store any user data itself.
-
-== Screenshots ==
-
-1. The settings page — paste your tracking codes and save.
-2. Active status shown once tracking codes are configured.
+No. The plugin stores only the tracking code snippet you paste in, in your own WordPress database. It does not collect, transmit, or store any user data itself.
 
 == Changelog ==
+
+= 3.6.0 =
+* Restored single field tracking code entry for improved compatibility
+* Added automatic migration for users upgrading from all previous versions
+
+= 3.5.4 =
+* Fixed script tag output to prevent URL rendering as plain text on some themes
+* Normalised whitespace in script tags at save and migration time
+* Changed wp_head priority to fire after page title and SEO meta tags
 
 = 3.5.3 =
 * Fixed migration split to correctly separate script and noscript tags
 * Added validation to prevent noscript tag being saved in script field and vice versa
 * Improved hint text and placeholders to make field requirements clearer
 
+= 3.5.2 =
+* Fixed migration to correctly read tracking code from previous plugin version
 
 = 3.5.1 =
-* Catch users who updated to 3.4.0 before migration logic was added — migration now runs on any version below 3.5.1
+* Migration now runs on any version below 3.5.1 to catch users who updated to 3.4.0 early
 
 = 3.5.0 =
 * Automatic migration of tracking code from previous plugin version on activation
-* Old tracking code option removed on activation to prevent duplicate injection
-* Migration notice shown in admin after successful upgrade
 
 = 3.4.0 =
-* Separate script/noscript fields, correct head/body injection, async/defer stripping, redesigned settings page
+* Separate script and noscript fields, correct head and body injection, async and defer stripping, redesigned settings page
 
 = 2.0.3 =
-* Added wp_kses sanitisation on frontend output
-* Moved plugin_basename filter inside plugins_loaded hook
-* Added rel="noopener noreferrer" to all external links
-* Added direct link to Lead Forensics portal tracking code page
-* Full i18n support
+* Security and review improvements
 
 = 2.0.0 =
 * Complete rewrite with separate Script Tag and Noscript Tag fields
-* Correct injection positions (head / body open)
-* Automatic async/defer stripping
-* Redesigned settings page
 
 == Upgrade Notice ==
 
-= 3.5.1 =
-Covers all upgrade paths including users who updated to 3.4.0 before automatic migration was added.
-
-= 3.5.0 =
-Automatic tracking code migration from previous plugin version. Recommended update for all users.
-
-= 2.0.3 =
-Security and review improvements. Recommended update for all users.
+= 3.6.0 =
+Recommended update for all users. Includes automatic migration for all previous versions.
