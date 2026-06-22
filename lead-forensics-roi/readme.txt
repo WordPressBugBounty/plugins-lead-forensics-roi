@@ -2,8 +2,8 @@
 Contributors: leadforensics
 Tags: lead forensics, tracking, b2b, analytics, visitor tracking
 Requires at least: 5.2
-Tested up to: 6.5
-Stable tag: 3.6.0
+Tested up to: 7.0
+Stable tag: 3.6.1
 Requires PHP: 5.6
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
@@ -73,4 +73,7 @@ No. The plugin stores only the tracking code snippet you paste in, in your own W
 == Upgrade Notice ==
 
 = 3.6.0 =
-Recommended update for all users. Includes automatic migration for all previous versions.
+* Recommended update for all users. Includes automatic migration for all previous versions.
+
+= 3.6.1 =
+* Minor version update
